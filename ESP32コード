@@ -1,0 +1,32 @@
+#ESP32側
+#include <WiFi.h>
+const char *ssid = "ESP32_AP";
+const char *password = "1234";
+WiFiServer server(8000);
+void setup() {
+  Serial.begin(115200);
+  WiFi.softAP(ssid, password);
+  Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
+  server.begin();
+}
+void loop() {
+  WiFiClient client = server.available();
+  if (client) {
+    while (client.connected() && client.available()) {
+      String req = client.readStringUntil('\r');
+      Serial.println("Received: " + req);
+      client.println("Received: " + req);
+      client.stop();
+    }
+  }
+}
+#PC側
+import socket
+esp32_ip = "192.168.4.1"
+port = 8000
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((esp32_ip, port))
+msg = input("送る文字列: ")
+client.sendall(msg.encode())
+print(client.recv(4096).decode())
+client.close()
