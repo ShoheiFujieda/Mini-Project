@@ -1,0 +1,228 @@
+/*
+  二輪ローバー WASDキー操作
+  ESP32 + TB67H450 x2
+  左右モーターの回転速度を個別設定可能
+*/
+
+// ----- ピン設定 -----
+const int LEFT_IN1  = 26;
+const int LEFT_IN2  = 27;
+const int RIGHT_IN1 = 32;
+const int RIGHT_IN2 = 33;
+
+// ----- PWM設定 -----
+const int PWM_FREQ = 20000;   // PWM周波数 20kHz
+const int PWM_RESOLUTION = 8; // 8bit → 0～255
+
+// ESP32のPWMチャンネル
+const int LEFT_PWM_CH  = 0;
+const int RIGHT_PWM_CH = 1;
+
+// ----- 左右の速度 -----
+// 0～255で設定
+int LEFT_SPEED  = 200;  // 左モーター
+int RIGHT_SPEED = 150;  // 右モーター
+
+// ----- 安全タイムアウト -----
+const unsigned long COMMAND_TIMEOUT_MS = 300;
+unsigned long lastCommandMillis = 0;
+
+// 現在の走行状態
+char currentCommand = 'x';
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LEFT_IN1, OUTPUT);
+  pinMode(LEFT_IN2, OUTPUT);
+  pinMode(RIGHT_IN1, OUTPUT);
+  pinMode(RIGHT_IN2, OUTPUT);
+
+  // PWM設定
+  ledcSetup(LEFT_PWM_CH, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(RIGHT_PWM_CH, PWM_FREQ, PWM_RESOLUTION);
+
+  // PWMをIN1に接続
+  ledcAttachPin(LEFT_IN1, LEFT_PWM_CH);
+  ledcAttachPin(RIGHT_IN1, RIGHT_PWM_CH);
+
+  stopMotors();
+
+  Serial.println("=== Rover WASD Control Ready ===");
+  Serial.println("w:forward s:backward a:turn-left d:turn-right x/space:stop");
+}
+
+void loop() {
+
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    handleCommand(c);
+  }
+
+  // タイムアウト
+  if (currentCommand != 'x' &&
+      (millis() - lastCommandMillis) > COMMAND_TIMEOUT_MS) {
+
+    stopMotors();
+    currentCommand = 'x';
+
+    Serial.println("[timeout] auto stop");
+  }
+}
+
+void handleCommand(char c) {
+
+  // 改行・CRは無視
+  if (c == '\n' || c == '\r') {
+    return;
+  }
+
+  lastCommandMillis = millis();
+
+  switch (c) {
+
+    case 'w':
+    case 'W':
+      forward();
+      currentCommand = 'w';
+      break;
+
+    case 's':
+    case 'S':
+      backward();
+      currentCommand = 's';
+      break;
+
+    case 'a':
+    case 'A':
+      turnLeft();
+      currentCommand = 'a';
+      break;
+
+    case 'd':
+    case 'D':
+      turnRight();
+      currentCommand = 'd';
+      break;
+
+    case 'x':
+    case 'X':
+    case ' ':
+      stopMotors();
+      currentCommand = 'x';
+      break;
+
+    default:
+      return;
+  }
+
+  Serial.print("[cmd] ");
+  Serial.println(c);
+}
+
+
+// =================================================
+// 左モーター制御
+// =================================================
+
+void setLeftMotor(bool forwardDirection, int speed) {
+
+  speed = constrain(speed, 0, 255);
+
+  if (forwardDirection) {
+    // 正転
+    digitalWrite(LEFT_IN2, LOW);
+    ledcWrite(LEFT_PWM_CH, speed);
+  }
+  else {
+    // 逆転
+    digitalWrite(LEFT_IN1, LOW);
+    digitalWrite(LEFT_IN2, HIGH);
+
+    // 逆転時も速度をPWMにしたい場合
+    // IN2をPWMにする必要があるため、
+    // 現在の構成では一定速度の逆転になる
+    ledcWrite(LEFT_PWM_CH, 0);
+  }
+}
+
+
+// =================================================
+// 右モーター制御
+// =================================================
+
+void setRightMotor(bool forwardDirection, int speed) {
+
+  speed = constrain(speed, 0, 255);
+
+  if (forwardDirection) {
+    // 正転
+    digitalWrite(RIGHT_IN2, LOW);
+    ledcWrite(RIGHT_PWM_CH, speed);
+  }
+  else {
+    digitalWrite(RIGHT_IN1, LOW);
+    digitalWrite(RIGHT_IN2, HIGH);
+
+    ledcWrite(RIGHT_PWM_CH, 0);
+  }
+}
+
+
+// =================================================
+// 走行パターン
+// =================================================
+
+void forward() {
+
+  setLeftMotor(true, LEFT_SPEED);
+  setRightMotor(true, RIGHT_SPEED);
+}
+
+void backward() {
+
+  // 現状では逆転速度を個別設定するためには
+  // IN2側にもPWMチャンネルが必要
+  digitalWrite(LEFT_IN1, LOW);
+  digitalWrite(LEFT_IN2, HIGH);
+
+  digitalWrite(RIGHT_IN1, LOW);
+  digitalWrite(RIGHT_IN2, HIGH);
+}
+
+void turnLeft() {
+
+  // 左：逆転
+  digitalWrite(LEFT_IN1, LOW);
+  digitalWrite(LEFT_IN2, HIGH);
+
+  // 右：正転
+  setRightMotor(true, RIGHT_SPEED);
+}
+
+void turnRight() {
+
+  // 左：正転
+  setLeftMotor(true, LEFT_SPEED);
+
+  // 右：逆転
+  digitalWrite(RIGHT_IN1, LOW);
+  digitalWrite(RIGHT_IN2, HIGH);
+}
+
+
+// =================================================
+// 停止
+// =================================================
+
+void stopMotors() {
+
+  ledcWrite(LEFT_PWM_CH, 0);
+  ledcWrite(RIGHT_PWM_CH, 0);
+
+  digitalWrite(LEFT_IN1, LOW);
+  digitalWrite(LEFT_IN2, LOW);
+
+  digitalWrite(RIGHT_IN1, LOW);
+  digitalWrite(RIGHT_IN2, LOW);
+}
